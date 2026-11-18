@@ -1,0 +1,1362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RSLaA — Self-Reconfiguring Roadside LiDARs as Agents</title>
+<meta name="description" content="RSLaA turns roadside LiDARs into agents that adaptively re-configure their pose for 3D traffic perception, driven by a causal, history-only surrogate metric.">
+<meta property="og:title" content="RSLaA — Self-Reconfiguring Roadside LiDARs as Agents">
+<meta property="og:description" content="Adaptive pose configuration for roadside LiDARs. Benchmark, MPC and MAPPO, validated on 10 sites and 890 six-hour runs.">
+<meta property="og:image" content="assets/fig_0.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%23ffb6a3'/%3E%3Cstop offset='1' stop-color='%239fc0ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx='32' cy='32' r='26' fill='url(%23g)'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #000000;
+    --fg: #f5f5f7;
+    --muted: #9a9aa0;
+    --muted-2: #6e6e73;
+    --line: rgba(255, 255, 255, .085);
+    --line-strong: rgba(255, 255, 255, .14);
+    --card: #0a0a0c;
+    --card-2: #101013;
+    --grad: linear-gradient(96deg, #ffb6a3 0%, #ff8fa8 42%, #9fc0ff 100%);
+    --grad-soft: linear-gradient(96deg, rgba(255, 182, 163, .18), rgba(159, 192, 255, .18));
+    --radius: 22px;
+    --max: 1320px;
+    --ease: cubic-bezier(.16, 1, .3, 1);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: 'Aptos', 'Aptos Display', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+                 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  html[lang="zh-CN"] body,
+  html[lang="zh"] body {
+    font-family: 'Microsoft YaHei', 'Microsoft YaHei UI', 'PingFang SC',
+                 'Hiragino Sans GB', 'Noto Sans SC', sans-serif;
+  }
+
+  html[lang="zh-CN"] h1,
+  html[lang="zh"] h1 {
+    line-height: 1.24;
+    letter-spacing: -.015em;
+  }
+
+  ::selection { background: rgba(255, 143, 168, .32); }
+
+  a { color: inherit; text-decoration: none; }
+
+  img { max-width: 100%; }
+
+  .bg {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(900px 620px at 12% -6%, rgba(255, 150, 130, .12), transparent 62%),
+      radial-gradient(1000px 720px at 92% -2%, rgba(118, 158, 255, .13), transparent 64%),
+      radial-gradient(900px 700px at 50% 108%, rgba(150, 120, 255, .07), transparent 62%);
+  }
+
+  .container {
+    width: 100%;
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 clamp(20px, 4vw, 56px);
+  }
+
+  /* ------------------------------------------------------------------ nav */
+  .nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 60;
+    background: rgba(0, 0, 0, .62);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
+    backdrop-filter: blur(22px) saturate(180%);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .nav-inner {
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+  }
+
+  .brand-mark {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--grad);
+    box-shadow: 0 0 18px rgba(255, 143, 168, .45);
+  }
+
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    margin-left: auto;
+    margin-right: 8px;
+    font-size: 13px;
+    color: #c7c7cc;
+  }
+
+  .nav-links a {
+    position: relative;
+    padding: 6px 0;
+    transition: color .25s ease;
+  }
+
+  .nav-links a:hover { color: #fff; }
+
+  .nav-links a::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 100%;
+    bottom: 0;
+    height: 1px;
+    background: var(--grad);
+    transition: right .35s var(--ease);
+  }
+
+  .nav-links a:hover::after { right: 0; }
+
+  .lang {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px;
+    border: 1px solid var(--line-strong);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .035);
+  }
+
+  .lang button {
+    appearance: none;
+    border: 0;
+    background: transparent;
+    color: #a8a8ae;
+    font: inherit;
+    font-size: 11.5px;
+    letter-spacing: .04em;
+    padding: 4px 10px;
+    min-width: 38px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all .25s ease;
+  }
+
+  .lang button.active {
+    background: #f5f5f7;
+    color: #050505;
+  }
+
+  /* ----------------------------------------------------------------- hero */
+  .hero {
+    padding: clamp(112px, 14vw, 164px) 0 clamp(64px, 8vw, 104px);
+  }
+
+  .hero-grid {
+    display: grid;
+    grid-template-columns: 1.12fr .88fr;
+    gap: clamp(32px, 5vw, 76px);
+    align-items: center;
+  }
+
+  .hero-figure {
+    margin: 0;
+    background: #fff;
+    border-radius: 26px;
+    padding: 10px;
+    box-shadow: 0 36px 90px rgba(0, 0, 0, .62), 0 0 0 1px rgba(255, 255, 255, .09);
+  }
+
+  .hero-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 18px;
+  }
+
+  .hero-figure figcaption {
+    color: #6e6e73;
+    font-size: 11px;
+    text-align: center;
+    padding: 9px 4px 2px;
+    letter-spacing: .01em;
+  }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 20px;
+    font-size: 11.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: #a8a8ae;
+  }
+
+  .eyebrow::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--grad);
+    box-shadow: 0 0 12px rgba(255, 143, 168, .65);
+  }
+
+  h1 {
+    margin: 0;
+    font-size: clamp(32px, 3.55vw, 50px);
+    line-height: 1.08;
+    letter-spacing: -.032em;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  h1 .grad {
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  h1 .colon { color: #fff; }
+
+  .lede {
+    margin: 24px 0 0;
+    font-size: clamp(15px, 1.15vw, 17px);
+    line-height: 1.68;
+    color: #a9a9af;
+    max-width: 50ch;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-top: 32px;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    height: 42px;
+    padding: 0 20px;
+    border-radius: 999px;
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: .005em;
+    transition: all .3s var(--ease);
+    border: 1px solid transparent;
+  }
+
+  .btn-primary {
+    background: #f5f5f7;
+    color: #050505;
+  }
+
+  .btn-primary:hover {
+    background: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px rgba(255, 255, 255, .14);
+  }
+
+  .btn-ghost {
+    border-color: var(--line-strong);
+    color: #e8e8ed;
+    background: rgba(255, 255, 255, .03);
+  }
+
+  .btn-ghost:hover {
+    border-color: rgba(255, 255, 255, .3);
+    background: rgba(255, 255, 255, .06);
+  }
+
+  .btn svg { width: 14px; height: 14px; }
+
+  .hero-note {
+    margin: 18px 0 0;
+    font-size: 12px;
+    color: #6e6e73;
+  }
+
+  /* -------------------------------------------------------------- section */
+  .section {
+    padding: clamp(72px, 9vw, 132px) 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .section-head {
+    max-width: 900px;
+    margin-bottom: clamp(36px, 4vw, 56px);
+  }
+
+  .section-head.center {
+    margin-left: auto;
+    margin-right: auto;
+    text-align: center;
+  }
+
+  .kicker {
+    display: inline-block;
+    margin-bottom: 16px;
+    font-size: 11.5px;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  h2 {
+    margin: 0;
+    font-size: clamp(28px, 3.3vw, 46px);
+    line-height: 1.12;
+    letter-spacing: -.03em;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .section-sub {
+    margin: 18px 0 0;
+    font-size: clamp(14.5px, 1.15vw, 16.5px);
+    line-height: 1.7;
+    color: #9a9aa0;
+    max-width: 74ch;
+  }
+
+  .section-head.center .section-sub {
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .grad-text {
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* ----------------------------------------------------------------- video */
+  .video-shell {
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    background: #050506;
+    box-shadow: 0 40px 100px rgba(0, 0, 0, .65);
+  }
+
+  .video-shell video {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1920 / 704;
+    object-fit: cover;
+    background: #000;
+    vertical-align: middle;
+  }
+
+  .video-caption {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 14px;
+    font-size: 11.5px;
+    color: #6e6e73;
+    letter-spacing: .01em;
+  }
+
+  .motivation {
+    max-width: 980px;
+    margin: clamp(40px, 5vw, 64px) auto 0;
+    text-align: center;
+    font-size: clamp(18px, 1.9vw, 25px);
+    line-height: 1.58;
+    letter-spacing: -.015em;
+    color: #d4d4d9;
+  }
+
+  .motivation p { margin: 0 0 18px; }
+  .motivation p:last-child { margin-bottom: 0; }
+
+  .tags {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-top: 30px;
+  }
+
+  .tag {
+    font-size: 12px;
+    color: #b9b9bf;
+    padding: 7px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--line-strong);
+    background: rgba(255, 255, 255, .028);
+  }
+
+  /* ------------------------------------------------------------- benchmark */
+  .wide-figure {
+    margin: 0;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line-strong);
+    background: #000;
+    box-shadow: 0 26px 70px rgba(0, 0, 0, .55);
+  }
+
+  .wide-figure img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .figcaption {
+    margin: 14px 2px 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #7c7c82;
+  }
+
+  .split {
+    display: grid;
+    grid-template-columns: .92fr 1.08fr;
+    gap: clamp(32px, 5vw, 72px);
+    align-items: center;
+    margin-top: clamp(44px, 5vw, 68px);
+  }
+
+  .bench-copy p {
+    margin: 0 0 26px;
+    font-size: 16px;
+    line-height: 1.72;
+    color: #b4b4ba;
+  }
+
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+
+  .stat {
+    background: #08080a;
+    padding: 18px 16px 16px;
+  }
+
+  .stat b {
+    display: block;
+    font-size: clamp(21px, 2vw, 27px);
+    font-weight: 600;
+    letter-spacing: -.02em;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .stat span {
+    display: block;
+    margin-top: 4px;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: #7c7c82;
+  }
+
+  .paper-card {
+    margin: 0;
+    background: #fff;
+    border-radius: 16px;
+    padding: 10px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, .5);
+  }
+
+  .paper-card img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+  }
+
+  .paper-card figcaption {
+    color: #505055;
+    font-size: 12px;
+    line-height: 1.55;
+    padding: 12px 8px 4px;
+  }
+
+  /* ------------------------------------------------------------- statement */
+  .statement {
+    padding: clamp(56px, 7vw, 92px) 0;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    background:
+      radial-gradient(700px 220px at 50% 50%, rgba(255, 143, 168, .07), transparent 70%),
+      #030304;
+    text-align: center;
+  }
+
+  .statement-main {
+    margin: 0;
+    font-size: clamp(24px, 3.2vw, 44px);
+    line-height: 1.25;
+    letter-spacing: -.03em;
+    font-weight: 500;
+    color: #e8e8ed;
+  }
+
+  .statement-main .num {
+    font-weight: 600;
+    background: var(--grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .statement-main .sep {
+    color: #48484c;
+    padding: 0 .35em;
+  }
+
+  .statement-sub {
+    margin: 16px 0 0;
+    font-size: 13px;
+    color: #7c7c82;
+    letter-spacing: .01em;
+  }
+
+  /* --------------------------------------------------------------- results */
+  .three {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(16px, 2vw, 24px);
+  }
+
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 12px 12px 20px;
+    transition: transform .4s var(--ease), border-color .4s ease;
+  }
+
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(255, 255, 255, .17);
+  }
+
+  .shot {
+    background: #fff;
+    border-radius: 12px;
+    padding: 9px;
+    overflow: hidden;
+  }
+
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .card h3 {
+    margin: 17px 8px 7px;
+    font-size: 15.5px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    color: #f2f2f5;
+  }
+
+  .card p {
+    margin: 0 8px;
+    font-size: 12.8px;
+    line-height: 1.62;
+    color: #8e8e93;
+  }
+
+  /* --------------------------------------------------------------- analyse */
+  .analysis {
+    display: grid;
+    grid-template-columns: 1.16fr .84fr;
+    gap: clamp(16px, 2vw, 24px);
+    align-items: stretch;
+  }
+
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 12px 12px 20px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel h3 {
+    margin: 8px 8px 12px;
+    font-size: 15.5px;
+    font-weight: 600;
+    color: #f2f2f5;
+    letter-spacing: -.01em;
+  }
+
+  .panel .shot { flex: 0 0 auto; }
+
+  .panel .note {
+    margin: 16px 8px 0;
+    font-size: 12.8px;
+    line-height: 1.65;
+    color: #8e8e93;
+  }
+
+  .panel .note strong {
+    color: #d7d7dc;
+    font-weight: 500;
+  }
+
+  .side {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: clamp(16px, 2vw, 24px);
+  }
+
+  .mini-stats {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    margin: 16px 8px 0;
+  }
+
+  .mini-stats div {
+    background: #0d0d10;
+    padding: 11px 8px;
+    text-align: center;
+  }
+
+  .mini-stats b {
+    display: block;
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mini-stats span {
+    font-size: 10.5px;
+    color: #74747a;
+    letter-spacing: .02em;
+  }
+
+  .implication {
+    margin: 16px 8px 0;
+    padding: 11px 13px;
+    border-left: 2px solid transparent;
+    border-image: linear-gradient(180deg, #ffb6a3, #9fc0ff) 1;
+    background: rgba(255, 255, 255, .025);
+    border-radius: 0 8px 8px 0;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #a0a0a6;
+  }
+
+  /* --------------------------------------------------------------- footer */
+  footer {
+    border-top: 1px solid var(--line);
+    padding: clamp(56px, 7vw, 84px) 0 44px;
+    background: #000;
+  }
+
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1fr;
+    gap: clamp(28px, 4vw, 64px);
+  }
+
+  .footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 16px;
+    font-weight: 600;
+  }
+
+  .footer-brand .brand-mark { width: 16px; height: 16px; }
+
+  .footer-text {
+    margin: 14px 0 0;
+    font-size: 13px;
+    line-height: 1.75;
+    color: #85858b;
+  }
+
+  .footer-label {
+    margin: 0 0 12px;
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: #6e6e73;
+  }
+
+  .footer-grid a:hover { color: #fff; }
+
+  .footer-bottom {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: clamp(40px, 5vw, 64px);
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    font-size: 11.5px;
+    color: #5c5c61;
+  }
+
+  /* -------------------------------------------------------------- motion */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity .9s var(--ease), transform .9s var(--ease);
+  }
+
+  .reveal.in {
+    opacity: 1;
+    transform: none;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+  }
+
+  /* ------------------------------------------------------------ responsive */
+  @media (max-width: 1040px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 40px; }
+    .hero-copy { max-width: 720px; }
+    .lede { max-width: 62ch; }
+    .analysis { grid-template-columns: 1fr; }
+    .side { grid-template-rows: none; grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 900px) {
+    .nav-links { display: none; }
+    .lang { margin-left: auto; }
+    .three { grid-template-columns: 1fr; }
+    .split { grid-template-columns: 1fr; }
+    .footer-grid { grid-template-columns: 1fr 1fr; }
+  }
+
+  @media (max-width: 640px) {
+    .stats { grid-template-columns: 1fr 1fr; }
+    .side { grid-template-columns: 1fr; }
+    .footer-grid { grid-template-columns: 1fr; }
+    .video-caption { flex-direction: column; gap: 4px; }
+    .hero-actions .btn { flex: 1 1 auto; justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div class="bg" aria-hidden="true"></div>
+
+<!-- ------------------------------------------------------------------ nav -->
+<header class="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="#overview">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span>RSLaA</span>
+    </a>
+
+    <nav class="nav-links" aria-label="Primary">
+      <a href="#overview" data-i18n="nav_overview">Overview</a>
+      <a href="#motivation" data-i18n="nav_motivation">Motivation</a>
+      <a href="#benchmark" data-i18n="nav_benchmark">Benchmark</a>
+      <a href="#results" data-i18n="nav_results">Results</a>
+      <a href="#insights" data-i18n="nav_insights">Insights</a>
+      <a href="#paper" data-i18n="nav_paper">Paper</a>
+    </nav>
+
+    <div class="lang" role="group" aria-label="Language">
+      <button type="button" data-lang="en" class="active">EN</button>
+      <button type="button" data-lang="zh">中文</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- --------------------------------------------------------------- hero -->
+  <section class="hero" id="overview">
+    <div class="container hero-grid">
+      <figure class="hero-figure reveal">
+        <img src="assets/fig_0.png"
+             alt="Concept of Roadside LiDARs as Agents: roadside sensors observe a dynamic road environment and re-configure over time, compared with a static deployment."
+             width="1349" height="761">
+        <figcaption data-i18n="hero_figcaption">Figure 1 · Roadside LiDARs as agents: from one-off placement to window-by-window re-configuration.</figcaption>
+      </figure>
+
+      <div class="hero-copy reveal">
+        <p class="eyebrow" data-i18n="hero_eyebrow">Preprint · 2026</p>
+        <h1>
+          <span class="grad">RSLaA</span><span class="colon" data-i18n="colon">:</span><br>
+          <span data-i18n="hero_title_rest">Self-Reconfiguring Roadside LiDARs as Agents for 3D Traffic Perception</span>
+        </h1>
+        <p class="lede" data-i18n="hero_lede">
+          Roadside LiDARs are usually configured once and left untouched. RSLaA turns every
+          roadside LiDAR into an agent that re-optimises its pose at each decision window,
+          using only a causal, history-based surrogate metric — no ground truth at decision time.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#motivation">
+            <span data-i18n="btn_motivation">Watch the teaser</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a class="btn btn-ghost" href="#benchmark" data-i18n="btn_benchmark">Explore the benchmark</a>
+        </div>
+        <p class="hero-note" data-i18n="hero_note">Paper link will be added upon publication.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------- motivation -->
+  <section class="section" id="motivation">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker" data-i18n="kicker_motivation">Motivation</span>
+        <h2 data-i18n="motivation_title">Traffic moves. Fixed sensors do not.</h2>
+      </div>
+
+      <div class="video-shell reveal">
+        <video src="assets/fig_promo_scene001_4methods.mp4"
+               autoplay muted loop playsinline controls preload="metadata"
+               aria-label="Simulated LiDAR point clouds for static, MPC, MARL matched and MARL mismatched configurations"></video>
+      </div>
+      <div class="video-caption reveal">
+        <span data-i18n="video_caption_left">scene_001 · five consecutive 5-minute decision windows · accelerated playback</span>
+        <span data-i18n="video_caption_right">Static / MPC / MARL (matched) / MARL (mismatched)</span>
+      </div>
+
+      <div class="motivation reveal">
+        <p data-i18n-html="motivation_p1">
+          A placement that is optimal <em>on average</em> can be far from optimal at any given
+          moment — especially when a dense stream of vehicles systematically shadows a critical
+          region from a fixed viewpoint. Yet a deployed system cannot know whether a candidate
+          pose will help, because <span class="grad-text">ground truth is unavailable at decision time</span>.
+        </p>
+        <p data-i18n-html="motivation_p2">
+          RSLaA therefore scores candidate poses with a <span class="grad-text">surrogate metric</span>
+          computed only from the historical probabilistic occupancy grid. Five candidates are
+          validated against future-window perception labels; multi-view coverage emerges as the
+          most reliable predictor. On top of this signal, <span class="grad-text">adaptive configuration</span>
+          — receding-horizon MPC and a lightweight MAPPO policy — re-aims the sensors window by window.
+        </p>
+      </div>
+
+      <div class="tags reveal">
+        <span class="tag" data-i18n="tag_1">History-only, causal self-evaluation</span>
+        <span class="tag" data-i18n="tag_2">Detector-agnostic perception labels</span>
+        <span class="tag" data-i18n="tag_3">6-DoF pose adjustment</span>
+        <span class="tag" data-i18n="tag_4">5 / 15 / 30 min decision windows</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- benchmark -->
+  <section class="section" id="benchmark">
+    <div class="container">
+      <div class="section-head center reveal">
+        <span class="kicker" data-i18n="kicker_benchmark">Benchmark</span>
+        <h2 data-i18n="benchmark_title">A co-simulation benchmark for surrogate metrics</h2>
+        <p class="section-sub" data-i18n="benchmark_sub">
+          Every decision window pairs five history-only surrogate metrics with detector-agnostic
+          perception labels measured in the next window, so that correlation — not intuition —
+          selects the decision core.
+        </p>
+      </div>
+
+      <figure class="wide-figure reveal">
+        <img src="assets/fig_benchmark_windows_1x4.png"
+             alt="Four benchmark windows showing historical probabilistic occupancy grids and their surrogate and perception metrics."
+             width="5376" height="793" loading="lazy">
+      </figure>
+      <p class="figcaption reveal" data-i18n="benchmark_figcaption">
+        Historical POGs and per-window records from one benchmark run. Each column is a decision
+        window: five surrogate values on the left, IoU / Dev / Comp labels on the right.
+      </p>
+
+      <div class="split">
+        <div class="bench-copy reveal">
+          <p data-i18n="benchmark_p1">
+            The benchmark tiles 17 point-cloud sites and 25 traffic scenarios into gap-free rolling
+            windows of 5, 15 and 30 minutes. At each decision boundary, six candidate configurations
+            of two to three heterogeneous LiDARs are proposed within the pose margins, scored from
+            history only, and then replayed at high fidelity to obtain their true perception labels.
+          </p>
+          <div class="stats">
+            <div class="stat"><b>17</b><span data-i18n="stat_1">point-cloud sites</span></div>
+            <div class="stat"><b>25</b><span data-i18n="stat_2">traffic scenarios</span></div>
+            <div class="stat"><b>2,522</b><span data-i18n="stat_3">rolling windows</span></div>
+            <div class="stat"><b>2,449</b><span data-i18n="stat_4">decision windows</span></div>
+            <div class="stat"><b>14,694</b><span data-i18n="stat_5">candidate configurations</span></div>
+            <div class="stat"><b>211,938</b><span data-i18n="stat_6">valid metric pairs</span></div>
+          </div>
+          <p class="figcaption" data-i18n="benchmark_stats_note" style="margin-top:18px">
+            Five surrogates × three perception labels per candidate. Sites used for benchmarking
+            and for deployment are disjoint.
+          </p>
+        </div>
+
+        <figure class="paper-card reveal">
+          <img src="assets/corr_scatter_grid.png"
+               alt="Grid of scatter plots correlating five surrogate metrics with IoU, Dev and Comp across fifteen panels."
+               width="5416" height="2984" loading="lazy">
+          <figcaption data-i18n-html="corr_caption">
+            Surrogate–perception correlation. Multi-view coverage <b>J<sub>mv</sub></b> offers the best
+            balance between correlation strength and relevance to moving-vehicle perception
+            (Pearson r = 0.571, p &lt; 0.05), and becomes the shared optimisation core.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- ----------------------------------------------------------- statement -->
+  <section class="statement">
+    <div class="container reveal">
+      <p class="statement-main">
+        <span class="num">10</span> <span data-i18n="stmt_sites">sites</span>
+        <span class="sep">·</span>
+        <span class="num">89</span> <span data-i18n="stmt_scenarios">six-hour scenarios</span>
+        <span class="sep">·</span>
+        <span class="num">890</span> <span data-i18n="stmt_runs">evaluation runs</span>
+      </p>
+      <p class="statement-sub" data-i18n="stmt_sub">
+        Real roadside point clouds · urban arterials, signalised intersections and curves · all strategies share identical initial poses
+      </p>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- results -->
+  <section class="section" id="results">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker" data-i18n="kicker_results">Results</span>
+        <h2 data-i18n="results_title">Adaptive deployment wins — with every controller</h2>
+        <p class="section-sub" data-i18n="results_sub">
+          Across 10 deployment sites and 89 six-hour scenarios, the three adaptive strategies
+          improve perception over the static baseline while sharing exactly the same initial
+          poses, sensor suites and traffic data.
+        </p>
+      </div>
+
+      <div class="three">
+        <article class="card reveal">
+          <div class="shot">
+            <img src="assets/fig_box_delta_iou_mr_dev_n.png"
+                 alt="Frame-wise distributions of IoU, invalid-box rate and deviation differences with respect to the static baseline."
+                 width="8206" height="2355" loading="lazy">
+          </div>
+          <h3 data-i18n="res1_title">Frame-level deltas</h3>
+          <p data-i18n-html="res1_text">
+            ΔIoU, ΔI<sub>v</sub>R and ΔDev of every frame against the static run of the same
+            scenario. Medians move in the favourable direction for all three controllers.
+          </p>
+        </article>
+
+        <article class="card reveal">
+          <div class="shot">
+            <img src="assets/fig_bar_relative_change_n.png"
+                 alt="Relative change of IoU, invalid-box rate and deviation with respect to the static baseline for MPC, MARL matched and MARL mismatched."
+                 width="7053" height="2258" loading="lazy">
+          </div>
+          <h3 data-i18n="res2_title">Run-level relative change</h3>
+          <p data-i18n="res2_text">
+            IoU +5.6 / +6.9 / +6.1%, invalid-box rate −15.2 / −21.6 / −18.3%, and Dev
+            −5.8 / −3.2 / −2.9% for MPC, MARL (matched) and MARL (mismatched).
+          </p>
+        </article>
+
+        <article class="card reveal">
+          <div class="shot">
+            <img src="assets/fig_score_trends_n.png"
+                 alt="Composite score gain versus decision-window length, position margin and angle margin."
+                 width="7035" height="2297" loading="lazy">
+          </div>
+          <h3 data-i18n="res3_title">Design parameters</h3>
+          <p data-i18n="res3_text">
+            Window length dominates: gains turn positive from 15 min and peak at 30 min.
+            Pose margins are second-order, so tight settings (≈0.2 m, 5°) are sufficient.
+          </p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- insights -->
+  <section class="section" id="insights">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker" data-i18n="kicker_insights">Insights &amp; Sites</span>
+        <h2 data-i18n="insights_title">The scene explains most of the gain</h2>
+        <p class="section-sub" data-i18n="insights_sub">
+          A gradient-boosted model with TreeSHAP attributes the per-run perception gain to traffic
+          and geometry. Adaptive reconfiguration pays off when many small, densely packed objects
+          must be resolved — not when the road is wide and fast.
+        </p>
+      </div>
+
+      <div class="analysis">
+        <figure class="panel reveal">
+          <h3 data-i18n="shap_title">What drives the gain?</h3>
+          <div class="shot">
+            <img src="assets/fig_shap_n.png"
+                 alt="SHAP importance ranking and dependence plots for the per-run perception gain."
+                 width="7111" height="3014" loading="lazy">
+          </div>
+          <p class="note" data-i18n-html="shap_note">
+            Mean speed (<strong>31%</strong>), window length (<strong>26%</strong>) and lane width
+            (<strong>16%</strong>) dominate. Position margin is the least important factor
+            (<strong>≈0%</strong>): once the context is favourable, the controller choice and the
+            margin settings are second-order.
+          </p>
+          <div class="mini-stats">
+            <div><b>−24 km/h</b><span data-i18n="mini_1">gain flips sign</span></div>
+            <div><b>1.5–3 m</b><span data-i18n="mini_2">narrow lanes win</span></div>
+            <div><b>15–30 min</b><span data-i18n="mini_3">useful window</span></div>
+          </div>
+          <p class="implication" data-i18n="shap_implication">
+            Deployment recipe: predict whether a site will benefit, then use a 15–30 min window
+            with tight margins instead of tuning one global configuration.
+          </p>
+        </figure>
+
+        <div class="side">
+          <figure class="panel reveal">
+            <h3 data-i18n="sites_bench_title">17 benchmark sites</h3>
+            <div class="shot">
+              <img src="assets/fig_benchmark_sites_3x6.png"
+                   alt="Seventeen point-cloud sites used to build the surrogate benchmark."
+                   width="4224" height="1803" loading="lazy">
+            </div>
+            <p class="note" data-i18n="sites_bench_note">
+              Sixteen KITTI-360 segments plus one WHU-Urban3D mobile-mapping site.
+            </p>
+          </figure>
+
+          <figure class="panel reveal">
+            <h3 data-i18n="sites_deploy_title">10 deployment sites</h3>
+            <div class="shot">
+              <img src="assets/fig_deployment_sites_2x5.png"
+                   alt="Ten real roadside sites used for the adaptive deployment experiments."
+                   width="3520" height="1214" loading="lazy">
+            </div>
+            <p class="note" data-i18n="sites_deploy_note">
+              Straight arterials, signalised and unsignalised intersections, and curves —
+              disjoint from the benchmark sites.
+            </p>
+          </figure>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ---------------------------------------------------------------- footer -->
+<footer id="paper">
+  <div class="container">
+    <div class="footer-grid">
+      <div>
+        <div class="footer-brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span>RSLaA</span>
+        </div>
+        <p class="footer-text" data-i18n="footer_blurb">
+          Self-reconfiguring roadside LiDARs as agents for 3D traffic perception.
+          Simulator, benchmark and adaptive controllers in one repository.
+        </p>
+      </div>
+
+      <div>
+        <p class="footer-label" data-i18n="footer_affil">Affiliations</p>
+        <p class="footer-text" data-i18n-html="footer_affil_text">
+          Hefei University of Technology<br>
+          Metropolitan University, Canada
+        </p>
+      </div>
+
+      <div>
+        <p class="footer-label" data-i18n="footer_contact">Contact &amp; paper</p>
+        <p class="footer-text">
+          <a href="mailto:mayang@hfut.edu.cn">mayang@hfut.edu.cn</a><br>
+          <a href="#" data-i18n="footer_paper_link">Paper — link to be added</a>
+        </p>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span data-i18n="footer_copyright">© 2026 RSLaA Authors. All rights reserved.</span>
+      <span data-i18n="footer_built">Project page · static HTML · no external dependencies</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var I18N = {
+    en: {
+      nav_overview: "Overview",
+      nav_motivation: "Motivation",
+      nav_benchmark: "Benchmark",
+      nav_results: "Results",
+      nav_insights: "Insights",
+      nav_paper: "Paper",
+
+      hero_eyebrow: "Preprint · 2026",
+      colon: ":",
+      hero_title_rest: "Self-Reconfiguring Roadside LiDARs as Agents for 3D Traffic Perception",
+      hero_lede: "Roadside LiDARs are usually configured once and left untouched. RSLaA turns every roadside LiDAR into an agent that re-optimises its pose at each decision window, using only a causal, history-based surrogate metric — no ground truth at decision time.",
+      hero_figcaption: "Figure 1 · Roadside LiDARs as agents: from one-off placement to window-by-window re-configuration.",
+      btn_motivation: "Watch the teaser",
+      btn_benchmark: "Explore the benchmark",
+      hero_note: "Paper link will be added upon publication.",
+
+      kicker_motivation: "Motivation",
+      motivation_title: "Traffic moves. Fixed sensors do not.",
+      video_caption_left: "scene_001 · five consecutive 5-minute decision windows · accelerated playback",
+      video_caption_right: "Static / MPC / MARL (matched) / MARL (mismatched)",
+      motivation_p1: "A placement that is optimal <em>on average</em> can be far from optimal at any given moment — especially when a dense stream of vehicles systematically shadows a critical region from a fixed viewpoint. Yet a deployed system cannot know whether a candidate pose will help, because <span class=\"grad-text\">ground truth is unavailable at decision time</span>.",
+      motivation_p2: "RSLaA therefore scores candidate poses with a <span class=\"grad-text\">surrogate metric</span> computed only from the historical probabilistic occupancy grid. Five candidates are validated against future-window perception labels; multi-view coverage emerges as the most reliable predictor. On top of this signal, <span class=\"grad-text\">adaptive configuration</span> — receding-horizon MPC and a lightweight MAPPO policy — re-aims the sensors window by window.",
+      tag_1: "History-only, causal self-evaluation",
+      tag_2: "Detector-agnostic perception labels",
+      tag_3: "6-DoF pose adjustment",
+      tag_4: "5 / 15 / 30 min decision windows",
+
+      kicker_benchmark: "Benchmark",
+      benchmark_title: "A co-simulation benchmark for surrogate metrics",
+      benchmark_sub: "Every decision window pairs five history-only surrogate metrics with detector-agnostic perception labels measured in the next window, so that correlation — not intuition — selects the decision core.",
+      benchmark_figcaption: "Historical POGs and per-window records from one benchmark run. Each column is a decision window: five surrogate values on the left, IoU / Dev / Comp labels on the right.",
+      benchmark_p1: "The benchmark tiles 17 point-cloud sites and 25 traffic scenarios into gap-free rolling windows of 5, 15 and 30 minutes. At each decision boundary, six candidate configurations of two to three heterogeneous LiDARs are proposed within the pose margins, scored from history only, and then replayed at high fidelity to obtain their true perception labels.",
+      stat_1: "point-cloud sites",
+      stat_2: "traffic scenarios",
+      stat_3: "rolling windows",
+      stat_4: "decision windows",
+      stat_5: "candidate configurations",
+      stat_6: "valid metric pairs",
+      benchmark_stats_note: "Five surrogates × three perception labels per candidate. Sites used for benchmarking and for deployment are disjoint.",
+      corr_caption: "Surrogate–perception correlation. Multi-view coverage <b>J<sub>mv</sub></b> offers the best balance between correlation strength and relevance to moving-vehicle perception (Pearson r = 0.571, p &lt; 0.05), and becomes the shared optimisation core.",
+
+      stmt_sites: "sites",
+      stmt_scenarios: "six-hour scenarios",
+      stmt_runs: "evaluation runs",
+      stmt_sub: "Real roadside point clouds · urban arterials, signalised intersections and curves · all strategies share identical initial poses",
+
+      kicker_results: "Results",
+      results_title: "Adaptive deployment wins — with every controller",
+      results_sub: "Across 10 deployment sites and 89 six-hour scenarios, the three adaptive strategies improve perception over the static baseline while sharing exactly the same initial poses, sensor suites and traffic data.",
+      res1_title: "Frame-level deltas",
+      res1_text: "ΔIoU, ΔI<sub>v</sub>R and ΔDev of every frame against the static run of the same scenario. Medians move in the favourable direction for all three controllers.",
+      res2_title: "Run-level relative change",
+      res2_text: "IoU +5.6 / +6.9 / +6.1%, invalid-box rate −15.2 / −21.6 / −18.3%, and Dev −5.8 / −3.2 / −2.9% for MPC, MARL (matched) and MARL (mismatched).",
+      res3_title: "Design parameters",
+      res3_text: "Window length dominates: gains turn positive from 15 min and peak at 30 min. Pose margins are second-order, so tight settings (≈0.2 m, 5°) are sufficient.",
+
+      kicker_insights: "Insights & Sites",
+      insights_title: "The scene explains most of the gain",
+      insights_sub: "A gradient-boosted model with TreeSHAP attributes the per-run perception gain to traffic and geometry. Adaptive reconfiguration pays off when many small, densely packed objects must be resolved — not when the road is wide and fast.",
+      shap_title: "What drives the gain?",
+      shap_note: "Mean speed (<strong>31%</strong>), window length (<strong>26%</strong>) and lane width (<strong>16%</strong>) dominate. Position margin is the least important factor (<strong>≈0%</strong>): once the context is favourable, the controller choice and the margin settings are second-order.",
+      mini_1: "gain flips sign",
+      mini_2: "narrow lanes win",
+      mini_3: "useful window",
+      shap_implication: "Deployment recipe: predict whether a site will benefit, then use a 15–30 min window with tight margins instead of tuning one global configuration.",
+      sites_bench_title: "17 benchmark sites",
+      sites_bench_note: "Sixteen KITTI-360 segments plus one WHU-Urban3D mobile-mapping site.",
+      sites_deploy_title: "10 deployment sites",
+      sites_deploy_note: "Straight arterials, signalised and unsignalised intersections, and curves — disjoint from the benchmark sites.",
+
+      footer_blurb: "Self-reconfiguring roadside LiDARs as agents for 3D traffic perception. Simulator, benchmark and adaptive controllers in one repository.",
+      footer_affil: "Affiliations",
+      footer_affil_text: "Hefei University of Technology<br>Metropolitan University, Canada",
+      footer_contact: "Contact & paper",
+      footer_paper_link: "Paper — link to be added",
+      footer_copyright: "© 2026 RSLaA Authors. All rights reserved.",
+      footer_built: "Project page · static HTML · no external dependencies"
+    },
+
+    zh: {
+      nav_overview: "概览",
+      nav_motivation: "研究动机",
+      nav_benchmark: "评测基准",
+      nav_results: "实验结果",
+      nav_insights: "分析与场景",
+      nav_paper: "论文",
+
+      hero_eyebrow: "预印本 · 2026",
+      colon: "：",
+      hero_title_rest: "将路侧激光雷达视为自重构智能体的三维交通感知",
+      hero_lede: "路侧激光雷达通常只配置一次便长期固定。RSLaA 将每一台路侧激光雷达视为可自适应调整位姿的智能体，在每个决策时间窗仅依据因果的、历史可得的替代指标重新优化观测几何，无需决策时刻的真值。",
+      hero_figcaption: "图 1 · 将路侧激光雷达视为智能体：从一次性选址走向逐窗重构。",
+      btn_motivation: "观看演示",
+      btn_benchmark: "浏览评测基准",
+      hero_note: "论文链接将在正式发表后补充。",
+
+      kicker_motivation: "研究动机",
+      motivation_title: "交通在流动，固定传感器却静止不动。",
+      video_caption_left: "scene_001 · 连续 5 个 5 分钟决策窗 · 加速播放",
+      video_caption_right: "静态 / MPC / MARL（匹配）/ MARL（失配）",
+      motivation_p1: "一个在<em>平均意义</em>上最优的布设方案，在任一具体时刻都可能远离最优——尤其当密集车流系统性地遮挡关键区域时。然而部署中的系统无法预知候选位姿是否有益，因为<span class=\"grad-text\">决策时刻并不存在真值</span>。",
+      motivation_p2: "因此，RSLaA 仅依据历史概率占用栅格计算<span class=\"grad-text\">替代指标</span>来评价候选位姿。五种候选择优指标与未来时间窗的感知标签逐窗配对验证，多视角覆盖度被证明是最可靠的预测子。在此基础上，<span class=\"grad-text\">自适应配置</span>——滚动时域 MPC 与轻量 MAPPO 策略——逐窗重新指向传感器。",
+      tag_1: "仅依赖历史、因果的自评价",
+      tag_2: "与检测器无关的感知标签",
+      tag_3: "六自由度位姿调整",
+      tag_4: "5 / 15 / 30 分钟决策窗",
+
+      kicker_benchmark: "评测基准",
+      benchmark_title: "面向替代指标的联合仿真评测基准",
+      benchmark_sub: "每个决策窗将五种仅依赖历史的替代指标，与下一时间窗实测的、与检测器无关的感知标签配对，使决策核心由相关性而非直觉选出。",
+      benchmark_figcaption: "同一次基准构建中的历史 POG 与逐窗记录。每一列为一个决策窗：左侧为五项替代指标，右侧为 IoU / Dev / Comp 标签。",
+      benchmark_p1: "基准将 17 个点云地点与 25 个交通场景切分为无间隙的 5、15、30 分钟滚动窗口。在每个决策边界，于位姿裕度内提出 6 组由 2–3 台异构激光雷达构成的候选配置，仅用历史信息评分，再经高保真回放获得真实感知标签。",
+      stat_1: "点云地点",
+      stat_2: "交通场景",
+      stat_3: "滚动窗口",
+      stat_4: "决策窗口",
+      stat_5: "候选配置",
+      stat_6: "有效指标对",
+      benchmark_stats_note: "每个候选对应 5 项替代指标 × 3 项感知标签。基准地点与部署地点互不重叠。",
+      corr_caption: "替代指标与感知指标的相关性。多视角覆盖度 <b>J<sub>mv</sub></b> 在相关强度与运动车辆感知相关性之间取得最佳平衡（Pearson r = 0.571，p &lt; 0.05），被选为共享优化核心。",
+
+      stmt_sites: "个地点",
+      stmt_scenarios: "个六小时交通场景",
+      stmt_runs: "次评价运行",
+      stmt_sub: "真实路侧点云 · 城市主干道、信号与无信号交叉口、弯道 · 所有策略共享相同初始位姿",
+
+      kicker_results: "实验结果",
+      results_title: "无论采用哪种控制器，自适应部署都更优",
+      results_sub: "在 10 个部署地点与 89 个六小时场景上，三种自适应策略在完全相同的初始位姿、传感器组合与交通数据下，均优于静态基线。",
+      res1_title: "逐帧指标差异",
+      res1_text: "每一帧相对同场景静态运行的 ΔIoU、ΔI<sub>v</sub>R 与 ΔDev。三种控制器的中位数均朝有利方向移动。",
+      res2_title: "运行级相对变化",
+      res2_text: "MPC、MARL（匹配）与 MARL（失配）的 IoU 分别提升 5.6 / 6.9 / 6.1%，无效框率下降 15.2 / 21.6 / 18.3%，Dev 下降 5.8 / 3.2 / 2.9%。",
+      res3_title: "设计参数影响",
+      res3_text: "窗口长度是主导因素：15 分钟后收益转正，30 分钟达到峰值。位姿裕度影响较小，紧裕度（约 0.2 m、5°）已足够。",
+
+      kicker_insights: "分析与场景",
+      insights_title: "场景本身解释了大部分收益",
+      insights_sub: "基于梯度提升模型与 TreeSHAP 的归因表明，逐运行感知收益主要来自交通与几何条件。当需要分辨大量密集小目标时，自适应重构更有价值；宽阔快速的道路则不然。",
+      shap_title: "收益从何而来？",
+      shap_note: "平均速度（<strong>31%</strong>）、窗口长度（<strong>26%</strong>）与车道宽度（<strong>16%</strong>）占主导。位置裕度的重要性最低（<strong>≈0%</strong>）：一旦场景条件有利，控制器选择与裕度设置都成为次要因素。",
+      mini_1: "收益符号翻转",
+      mini_2: "窄车道更受益",
+      mini_3: "有效窗口",
+      shap_implication: "部署建议：先预测该地点是否受益，再采用 15–30 分钟窗口与紧裕度，而非为所有地点调一套全局配置。",
+      sites_bench_title: "17 个基准地点",
+      sites_bench_note: "16 段 KITTI-360 场景，加 1 个 WHU-Urban3D 移动测绘地点。",
+      sites_deploy_title: "10 个部署地点",
+      sites_deploy_note: "直线主干道、信号与无信号交叉口、弯道——与基准地点完全不相交。",
+
+      footer_blurb: "将路侧激光雷达视为自重构智能体的三维交通感知。仿真器、评测基准与自适应控制器集于同一仓库。",
+      footer_affil: "作者单位",
+      footer_affil_text: "合肥工业大学<br>加拿大都会大学",
+      footer_contact: "联系方式与论文",
+      footer_paper_link: "论文——链接待补充",
+      footer_copyright: "© 2026 RSLaA 作者。保留所有权利。",
+      footer_built: "项目主页 · 纯静态 HTML · 无外部依赖"
+    }
+  };
+
+  var current = "en";
+
+  function applyLang(lang) {
+    var dict = I18N[lang] || I18N.en;
+    current = lang;
+
+    document.documentElement.lang = (lang === "zh") ? "zh-CN" : "en";
+
+    document.querySelectorAll("[data-i18n]").forEach(function (el) {
+      var key = el.getAttribute("data-i18n");
+      if (dict[key] !== undefined) el.textContent = dict[key];
+    });
+
+    document.querySelectorAll("[data-i18n-html]").forEach(function (el) {
+      var key = el.getAttribute("data-i18n-html");
+      if (dict[key] !== undefined) el.innerHTML = dict[key];
+    });
+
+    document.querySelectorAll(".lang button").forEach(function (btn) {
+      btn.classList.toggle("active", btn.getAttribute("data-lang") === lang);
+    });
+
+    document.title = (lang === "zh")
+      ? "RSLaA — 将路侧激光雷达视为自重构智能体的三维交通感知"
+      : "RSLaA — Self-Reconfiguring Roadside LiDARs as Agents";
+
+    try { localStorage.setItem("rslaa-lang", lang); } catch (e) {}
+  }
+
+  document.querySelectorAll(".lang button").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      applyLang(btn.getAttribute("data-lang"));
+    });
+  });
+
+  var saved = null;
+  try { saved = localStorage.getItem("rslaa-lang"); } catch (e) {}
+  var requested = null;
+  try { requested = new URLSearchParams(window.location.search).get("lang"); } catch (e) {}
+  applyLang((requested === "en" || requested === "zh") ? requested : (saved === "zh" ? "zh" : "en"));
+
+  // Scroll reveal
+  var items = document.querySelectorAll(".reveal");
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add("in");
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.08, rootMargin: "0px 0px -6% 0px" });
+    items.forEach(function (el) { io.observe(el); });
+  } else {
+    items.forEach(function (el) { el.classList.add("in"); });
+  }
+})();
+</script>
+</body>
+</html>
