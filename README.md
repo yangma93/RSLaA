@@ -1,4 +1,4 @@
-# RSLaA — Roadside LiDARs as Agents
+# RSLaA - Roadside LiDARs as Agents
 
 **Self-reconfiguring roadside LiDARs for 3D traffic perception.**
 
